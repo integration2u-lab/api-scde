@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Scde {
+  id          BigInt    @id @default(autoincrement())
+  client      String
+  price       Decimal?  @db.Decimal(12, 2)
+  base_date   DateTime? @db.Date
+  adjusted    Decimal?  @db.Decimal(12, 2)
+  supplier    String?
+  meter       String?
+  consumption Decimal?  @db.Decimal(14, 6)
+  measurement String?
+  proinfa     Decimal?  @default(0) @db.Decimal(12, 3)
+  contract    Decimal?  @db.Decimal(14, 6)
+  minimum     Decimal?  @default(0) @db.Decimal(14, 6)
+  maximum     Decimal?  @db.Decimal(14, 6)
+  to_bill     Decimal?  @db.Decimal(14, 6)
+  cp          String?   @default("None.")
+  charges     Json?
+
+  @@map("scde")
+}
+
+model energy_contracts_v2 {
+  id          BigInt    @id @default(autoincrement())
+  client      String
+  price       Decimal?  @db.Decimal(12, 2)
+  base_date   DateTime? @db.Date
+  adjusted    Decimal?  @db.Decimal(12, 2)
+  supplier    String?
+  meter       String?
+  consumption Decimal?  @db.Decimal(14, 6)
+  measurement String?
+  proinfa     Decimal?  @default(0) @db.Decimal(12, 3)
+  contract    Decimal?  @db.Decimal(14, 6)
+  minimum     Decimal?  @default(0) @db.Decimal(14, 6)
+  maximum     Decimal?  @db.Decimal(14, 6)
+  to_invoice  Decimal?  @db.Decimal(14, 6)
+  cp          String?   @default("None.")
+  unnamed_14  String?
+  charges     Json?
+}
+
+model invoicing {
+  id               BigInt  @id @default(autoincrement())
+  company          String
+  date             String
+  consumption      Decimal @db.Decimal(12, 3)
+  losses_3_percent Decimal @db.Decimal(12, 3)
+  proinfa          Decimal @db.Decimal(12, 3)
+  requirement      Decimal @db.Decimal(12, 3)
+  resource         Decimal @db.Decimal(12, 3)
+  net              Decimal @db.Decimal(12, 3)
+}
+
+model n8n_chat_histories {
+  id         Int    @id @default(autoincrement())
+  session_id String @db.VarChar(255)
+  message    Json
+}
+
+model note {
+  id         BigInt  @id @default(autoincrement())
+  invoice    BigInt
+  client     String
+  supplier   String
+  to_invoice Decimal @db.Decimal(14, 3)
+  volume_mwh Decimal @db.Decimal(14, 3)
+  unit_price Decimal @db.Decimal(12, 2)
+  total      Decimal @db.Decimal(14, 2)
+  state      String  @db.Char(2)
+  icms       String?
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model peDaSerra {
+  id         BigInt   @id @default(autoincrement())
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  number     String?
+  Date       String?
+}
