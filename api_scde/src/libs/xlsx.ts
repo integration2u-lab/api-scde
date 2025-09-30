@@ -26,6 +26,7 @@ export const loadWorkbook = (buffer: Buffer): WorkBook =>
   });
 
 const normalizeSheetName = (name: string) => name.trim().toLowerCase();
+const compactSheetName = (name: string) => normalizeSheetName(name).replace(/\s+/g, "");
 
 export const detectSheet = (workbook: WorkBook): { name: string; sheet: WorkSheet } => {
   if (!workbook.SheetNames.length) {
@@ -33,19 +34,38 @@ export const detectSheet = (workbook: WorkBook): { name: string; sheet: WorkShee
   }
 
   const sheetNames = workbook.SheetNames;
+  type NormalizedSheet = { original: string; normalized: string; compact: string };
+  const normalizedEntries: NormalizedSheet[] = sheetNames.map((name) => ({
+    original: name,
+    normalized: normalizeSheetName(name),
+    compact: compactSheetName(name)
+  }));
 
-  const notaSheet = sheetNames.find((name) => normalizeSheetName(name) === "nota");
-  if (notaSheet) {
-    return { name: notaSheet, sheet: workbook.Sheets[notaSheet]! };
+  const selectSheet = (predicate: (entry: NormalizedSheet) => boolean) => {
+    const match = normalizedEntries.find(predicate);
+    return match ? { name: match.original, sheet: workbook.Sheets[match.original]! } : null;
+  };
+
+  const julSheet = selectSheet((entry) => entry.compact === "jul25");
+  if (julSheet) {
+    return julSheet;
   }
 
-  const monthSheet = sheetNames.find((name) =>
-    /^(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[0-9]{2}$/i.test(
-      normalizeSheetName(name).replace(/\s+/g, "")
-    )
+  const scdeSheet = selectSheet((entry) => entry.normalized === "scde");
+  if (scdeSheet) {
+    return scdeSheet;
+  }
+
+  const monthSheet = selectSheet((entry) =>
+    /^(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[0-9]{2}$/.test(entry.compact)
   );
   if (monthSheet) {
-    return { name: monthSheet, sheet: workbook.Sheets[monthSheet]! };
+    return monthSheet;
+  }
+
+  const notaSheet = selectSheet((entry) => entry.normalized === "nota");
+  if (notaSheet) {
+    return notaSheet;
   }
 
   const firstSheetName = sheetNames[0]!;

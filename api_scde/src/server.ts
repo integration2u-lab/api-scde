@@ -9,7 +9,8 @@ dotenv.config();
 
 const app = express();
 
-app.set("trust proxy", true);
+const trustProxySetting = process.env.TRUST_PROXY ?? "loopback";
+app.set("trust proxy", trustProxySetting);
 app.use(cors());
 app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT ?? "50mb" }));
 
@@ -45,3 +46,4 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 export default app;
+

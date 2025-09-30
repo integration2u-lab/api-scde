@@ -1,53 +1,74 @@
-# API SCDE - Balanco Energetico
+# API SCDE - Importador
 
-API em Node.js/Express com Prisma conectando ao Postgres (Supabase), capaz de importar planilhas (xlsx/csv) em base64, processa-las e realizar upsert em lote com controle de idempotencia.
+API em Node.js/Express que importa planilhas (xlsx/csv) em base64, processa duas abas principais (`jul25` e `SCDE`) e persiste os dados em três tabelas: `ImportBatch`, `EnergyBalance` e `Scde`.
 
 ## Requisitos
 
 - Node.js 18+
-- PostgreSQL acessivel via `DATABASE_URL`
+- PostgreSQL acessível via `DATABASE_URL`
 
-## Configuracao
+## Configuração
 
-1. Instale as dependencias:
+1. Instale as dependências:
    ```bash
    npm install
    ```
-2. Configure o arquivo `.env` com a variavel `DATABASE_URL` (e opcionalmente `PORT`, `LOG_LEVEL`, `MAX_IMPORT_PAYLOAD_BYTES`).
-3. Gere o client Prisma e execute migracoes conforme necessario:
+2. Crie `api_scde/.env` com as variáveis:
+   ```env
+   DATABASE_URL="postgresql://usuario:senha@host:5432/base?schema=public"
+   PORT=3000
+   LOG_LEVEL=info
+   MAX_IMPORT_PAYLOAD_BYTES=52428800
+   TRUST_PROXY="loopback"
+   ```
+3. Gere o client Prisma (pare o `npm run dev` antes de rodar o comando):
    ```bash
    npx prisma generate
-   npx prisma migrate dev
    ```
+   Ajuste o schema/tabelas no banco conforme necessário (as definições estão em `prisma/schema.prisma`).
 
-## Scripts uteis
+## Estrutura de Dados
 
-- `npm run dev` ? inicia a API com `ts-node` e `nodemon`.
-- `npm run build` ? compila TypeScript para `dist/`.
-- `npm start` ? executa a versao compilada.
-- `npm run prisma:pull` ? `prisma db pull && prisma generate`.
-- `npm run prisma:migrate` ? executa `prisma migrate dev`.
+- **ImportBatch**: metadados do lote (arquivo, estratégia, contagem de inserções/atualizações por tabela, erros e timestamps).
+- **EnergyBalance**: linhas importadas da aba `jul25` com colunas `clients`, `price`, `reference_date`, `consumption`, `to_bill`, entre outras.
+- **Scde**: linhas importadas da aba `SCDE` com colunas `agent`, `group_point`, `reference_month`, `active_c_kwh`, `quality`, `source`.
 
-## Endpoints principais
+## Fluxo do POST `/api/v1/balanco/import`
 
-- `POST /api/v1/balanco/import` ? recebe JSON com planilha em base64 e executa importacao/upsert.
-- `GET /api/v1/balanco/import/:batchId` ? retorna resumo de um lote de importacao.
-- `GET /api/v1/balanco/mes/:yyyyMM` ? agrega dados por mes e lista registros paginados.
-- `GET /health` ? verificacao basica de saude.
+1. Envie JSON com `fileName`, `mimeType`, `base64`, `origin`, `overwriteStrategy` (`upsert` ou `insertOnly`) e `idempotencyKey` opcional.
+2. A API valida o payload, decodifica o arquivo, localiza as abas `jul25` (ou padrão `mmmYY`) e `SCDE`.
+3. Cada aba é normalizada: datas são convertidas, valores numéricos transformados em `Decimal`, JSON de encargos parseado quando possível.
+4. Os dados são upsertados respeitando a estratégia escolhida. Contagens são armazenadas em `ImportBatch` e o response retorna o resumo.
 
-## Fluxo de importacao
+### Exemplo de chamada
 
-1. Envie o JSON com `fileName`, `mimeType`, `base64`, `origin`, `overwriteStrategy` (opcional) e `idempotencyKey` (opcional).
-2. A API decodifica o arquivo, detecta a aba relevante, normaliza cabecalhos e converte metricas (MWh -> kWh).
-3. Cria um `importBatchId` e realiza upsert conforme a estrategia (`upsert` ou `insertOnly`).
-4. Retorna os totais de linhas inseridas/atualizadas/puladas e erros encontrados.
+```bash
+curl -X POST http://localhost:3000/api/v1/balanco/import \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileName": "balanco-jul-25.xlsx",
+    "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "origin": "scde",
+    "overwriteStrategy": "upsert",
+    "base64": "<BASE64_DO_ARQUIVO>",
+    "idempotencyKey": "balanco-jul-2025"
+  }'
+```
 
-## Observacoes
+A resposta 201 inclui `counts.energyBalance` e `counts.scde`, além dos erros normalizados por aba/linha.
 
-- O limite padrao de upload e 50 MB (configuravel via `MAX_IMPORT_PAYLOAD_BYTES`).
-- Logs estruturados sao emitidos via `pino`, com `importBatchId` para correlacao.
-- Idempotencia e garantida por `idempotencyKey`; se omitido, e gerado a partir do SHA256 do arquivo base64.
+## Demais Endpoints
+
+- `GET /api/v1/balanco/import/:batchId` – resumo do lote (mesma estrutura do retorno do POST).
+- `GET /api/v1/balanco/mes/:yyyyMM` – pagina a tabela `EnergyBalance` para o mês informado e agrega `consumption` e `toBill`.
+- `GET /health` – verificação básica.
+
+## Observações
+
+- Limite padrão de upload: 50 MB (`MAX_IMPORT_PAYLOAD_BYTES`).
+- Defina `TRUST_PROXY` apenas quando houver proxy reverso confiável.
+- Ao reformular o banco, lembre-se de limpar as tabelas (`TRUNCATE ... CASCADE`) se precisar reiniciar os dados.
 
 ## Testes
 
-Ainda nao ha testes automatizados incluidos; recomenda-se adicionar specs em `test/*.spec.ts` conforme novas regras de negocio forem implementadas.
+Ainda não há testes automatizados. Adicione specs em `test/*.spec.ts` conforme a API evoluir.
