@@ -34,7 +34,7 @@ model EnergyBalance {
   numeroInstalacao String?     @db.VarChar(64)
   referencia       String
   dataBase         DateTime
-  consumoKwh       Decimal     @db.Decimal(18, 3)
+  consumoKwh       Decimal     @db.Decimal(14, 6)
   valorTotal       Decimal     @db.Decimal(18, 2)
   origin           String
   status           String      @default("novo")
