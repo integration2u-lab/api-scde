@@ -12,6 +12,11 @@ const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT ?? 3000);
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT?.trim() || "10mb";
 
+<<<<<<< HEAD
+=======
+const trustProxySetting = process.env.TRUST_PROXY ?? "loopback";
+app.set("trust proxy", trustProxySetting);
+>>>>>>> 07cac7cfaf7491e38c6375fb1d2a906cb2619168
 app.use(cors());
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
@@ -726,7 +731,15 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
+<<<<<<< HEAD
 process.on("SIGTERM", async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
+=======
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+export default app;
+
+>>>>>>> 07cac7cfaf7491e38c6375fb1d2a906cb2619168
