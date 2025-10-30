@@ -1,13 +1,13 @@
 import dotenv from "dotenv";
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { Prisma, PrismaClient, Scde } from "@prisma/client";
+import { Prisma, PrismaClient, Scde, EnergyBalance } from "@prisma/client";
 import * as XLSX from "xlsx";
 
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
+const basePrisma = new PrismaClient();
 
 const PORT = Number(process.env.PORT ?? 3000);
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT?.trim() || "10mb";
@@ -48,9 +48,88 @@ type SpreadsheetParseResult = {
   headerRow: number;
 };
 
+type SerializableEnergyBalance = Omit<
+  EnergyBalance,
+  "consumoKwh" | "valorTotal" | "proinfaContribution" | "dataBase" | "createdAt" | "updatedAt"
+> & {
+  consumoKwh: number;
+  valorTotal: number;
+  proinfaContribution: number | null;
+  dataBase: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const serialize = (record: Scde): SerializableScde => ({
   ...record,
   id: record.id.toString()
+});
+
+const decimalToNumber = (value: Prisma.Decimal | null | undefined): number | null => {
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null) {
+    return null;
+  }
+  return Number(value.toString());
+};
+
+const decimalsEqual = (
+  left: Prisma.Decimal | null | undefined,
+  right: Prisma.Decimal | null | undefined
+): boolean => {
+  if (left === null || left === undefined) {
+    return right === null || right === undefined;
+  }
+  if (right === null || right === undefined) {
+    return false;
+  }
+  return left.equals(right);
+};
+
+const computeScdeToBill = ({
+  price,
+  adjusted,
+  consumption,
+  proinfa
+}: {
+  price?: Prisma.Decimal | null;
+  adjusted?: Prisma.Decimal | null;
+  consumption?: Prisma.Decimal | null;
+  proinfa?: Prisma.Decimal | null;
+}): Prisma.Decimal | null => {
+  const unitPrice = adjusted ?? price;
+  if (!unitPrice || !consumption) {
+    return proinfa ?? null;
+  }
+
+  try {
+    let total = unitPrice.mul(consumption);
+    if (proinfa) {
+      total = total.plus(proinfa);
+    }
+    return total;
+  } catch (error) {
+    console.warn("Failed to compute SCDE to_bill", error);
+    return null;
+  }
+};
+
+const serializeEnergyBalance = (record: EnergyBalance): SerializableEnergyBalance => ({
+  id: record.id,
+  clienteNome: record.clienteNome,
+  numeroInstalacao: record.numeroInstalacao,
+  referencia: record.referencia,
+  dataBase: record.dataBase.toISOString(),
+  consumoKwh: Number(record.consumoKwh.toString()),
+  valorTotal: Number(record.valorTotal.toString()),
+  proinfaContribution: decimalToNumber(record.proinfaContribution),
+  origin: record.origin,
+  status: record.status,
+  importBatchId: record.importBatchId,
+  createdAt: record.createdAt.toISOString(),
+  updatedAt: record.updatedAt.toISOString()
 });
 
 const toDecimal = (value: unknown, field: string): Prisma.Decimal | null | undefined => {
@@ -146,6 +225,147 @@ const normalizeJsonForWrite = (
   }
   return value as Prisma.InputJsonValue;
 };
+
+const extractDecimalFromUpdate = (
+  value: unknown
+): Prisma.Decimal | null | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (value instanceof Prisma.Decimal) {
+    return value;
+  }
+  if (typeof value === "object") {
+    const candidate = value as { set?: unknown };
+    if (candidate && Object.prototype.hasOwnProperty.call(candidate, "set")) {
+      return extractDecimalFromUpdate(candidate.set);
+    }
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    try {
+      return new Prisma.Decimal(value);
+    } catch (error) {
+      console.warn("Unable to convert value to Prisma.Decimal", error);
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+const prisma = basePrisma.$extends({
+  query: {
+    energyBalance: {
+      async update({ args, query }) {
+        const result = await query(args);
+        const updateData = args.data as Record<string, unknown> | undefined;
+        const proinfaCandidate =
+          updateData?.proinfaContribution ?? updateData?.proinfa_contribution;
+        const extracted = extractDecimalFromUpdate(proinfaCandidate);
+        if (extracted !== undefined) {
+          await recalculateScdeForEnergyBalance(result as EnergyBalance);
+        }
+        return result;
+      },
+      async upsert({ args, query }) {
+        const result = await query(args);
+        const updateData = args.update as Record<string, unknown> | undefined;
+        const createData = args.create as Record<string, unknown> | undefined;
+        const updateExtracted = extractDecimalFromUpdate(
+          updateData?.proinfaContribution ?? updateData?.proinfa_contribution
+        );
+        const createExtracted = extractDecimalFromUpdate(
+          createData?.proinfaContribution ?? createData?.proinfa_contribution
+        );
+        if (updateExtracted !== undefined || createExtracted !== undefined) {
+          await recalculateScdeForEnergyBalance(result as EnergyBalance);
+        }
+        return result;
+      },
+      async create({ args, query }) {
+        const result = await query(args);
+        const createData = args.data as Record<string, unknown> | undefined;
+        const createExtracted = extractDecimalFromUpdate(
+          createData?.proinfaContribution ?? createData?.proinfa_contribution
+        );
+        if (createExtracted !== undefined) {
+          await recalculateScdeForEnergyBalance(result as EnergyBalance);
+        }
+        return result;
+      }
+    }
+  }
+});
+
+async function recalculateScdeForEnergyBalance(
+  balance: EnergyBalance
+): Promise<void> {
+  const proinfa = balance.proinfaContribution ?? null;
+
+  const searchConditions: Prisma.ScdeWhereInput[] = [];
+  const installation = balance.numeroInstalacao?.trim();
+  if (installation) {
+    searchConditions.push({ meter: installation });
+  }
+  const clientName = balance.clienteNome?.trim();
+  if (clientName) {
+    searchConditions.push({ client: clientName });
+  }
+
+  if (!searchConditions.length) {
+    return;
+  }
+
+  const baseWhere: Prisma.ScdeWhereInput = { OR: searchConditions };
+
+  let relatedRecords: Scde[] = [];
+
+  if (balance.dataBase instanceof Date) {
+    relatedRecords = await prisma.scde.findMany({
+      where: {
+        AND: [baseWhere, { base_date: balance.dataBase }]
+      }
+    });
+  }
+
+  if (!relatedRecords.length) {
+    relatedRecords = await prisma.scde.findMany({ where: baseWhere });
+  }
+
+  for (const record of relatedRecords) {
+    const computedToBill = computeScdeToBill({
+      price: record.price,
+      adjusted: record.adjusted,
+      consumption: record.consumption,
+      proinfa
+    });
+
+    const updateData: Prisma.ScdeUncheckedUpdateInput = {};
+    let hasChanges = false;
+
+    if (!decimalsEqual(record.proinfa, proinfa)) {
+      updateData.proinfa = proinfa;
+      hasChanges = true;
+    }
+
+    if (computedToBill !== null) {
+      const currentToBill = record.to_bill;
+      if (currentToBill === null || !currentToBill.equals(computedToBill)) {
+        updateData.to_bill = computedToBill;
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      await prisma.scde.update({
+        where: { id: record.id },
+        data: updateData
+      });
+    }
+  }
+}
 
 const HEADER_MAP: Record<string, keyof Prisma.ScdeUncheckedCreateInput | "charges"> = {
   client: "client",
@@ -589,12 +809,24 @@ const parseRecord = (item: IncomingScde): ParsedRecord => {
   if (toBill !== undefined) {
     createData.to_bill = toBill;
     updateData.to_bill = toBill;
+  } else {
+    const computedToBill = computeScdeToBill({
+      price: price === undefined ? undefined : price,
+      adjusted: adjusted === undefined ? undefined : adjusted,
+      consumption: consumption === undefined ? undefined : consumption,
+      proinfa: proinfa === undefined ? undefined : proinfa
+    });
+    if (computedToBill !== null) {
+      createData.to_bill = computedToBill;
+      updateData.to_bill = computedToBill;
+    }
   }
 
   const cp = toOptionalString(item.cp, "cp");
   if (cp !== undefined) {
-    createData.cp = cp;
-    updateData.cp = cp;
+    const normalizedCp = cp === null ? "None." : cp;
+    createData.cp = normalizedCp;
+    updateData.cp = normalizedCp;
   }
 
   const charges = toJson(item.charges, "charges");
@@ -609,6 +841,51 @@ const parseRecord = (item: IncomingScde): ParsedRecord => {
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ ok: true });
+});
+
+app.patch("/energy-balance/:id/proinfa", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (typeof id !== "string" || id.trim().length === 0) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+
+  const payload = (req.body ?? {}) as Record<string, unknown>;
+  const rawValue = Object.prototype.hasOwnProperty.call(payload, "proinfaContribution")
+    ? payload.proinfaContribution
+    : payload.proinfa_contribution;
+
+  let proinfa: Prisma.Decimal | null | undefined;
+  try {
+    proinfa = toDecimal(rawValue, "proinfaContribution");
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Invalid proinfaContribution"
+    });
+  }
+
+  if (proinfa === undefined) {
+    return res.status(400).json({ error: "Field proinfaContribution is required" });
+  }
+
+  try {
+    const updated = await prisma.energyBalance.update({
+      where: { id },
+      data: {
+        proinfaContribution: proinfa,
+        updatedAt: new Date()
+      }
+    });
+
+    res.json(serializeEnergyBalance(updated));
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return res.status(404).json({ error: "Record not found" });
+    }
+    res.status(500).json({ error: "Failed to update energy balance" });
+  }
 });
 
 app.get("/scde", async (_req: Request, res: Response) => {
@@ -683,11 +960,11 @@ app.post("/scde", async (req: Request, res: Response) => {
     try {
       const { client, createData, updateData } = parseRecord(record);
 
-      const existing = await prisma.scde.findUnique({ where: { client } });
+      const existing = await prisma.scde.findFirst({ where: { client } });
 
       if (existing) {
         const result = await prisma.scde.update({
-          where: { client },
+          where: { id: existing.id },
           data: updateData
         });
         updated.push(serialize(result));

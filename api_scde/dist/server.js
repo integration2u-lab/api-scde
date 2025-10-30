@@ -44,7 +44,7 @@ const client_1 = require("@prisma/client");
 const XLSX = __importStar(require("xlsx"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
-const prisma = new client_1.PrismaClient();
+const basePrisma = new client_1.PrismaClient();
 const PORT = Number((_a = process.env.PORT) !== null && _a !== void 0 ? _a : 3000);
 const JSON_BODY_LIMIT = ((_b = process.env.JSON_BODY_LIMIT) === null || _b === void 0 ? void 0 : _b.trim()) || "10mb";
 app.use((0, cors_1.default)());
@@ -52,6 +52,56 @@ app.use(express_1.default.json({ limit: JSON_BODY_LIMIT }));
 const serialize = (record) => ({
     ...record,
     id: record.id.toString()
+});
+const decimalToNumber = (value) => {
+    if (value === undefined) {
+        return null;
+    }
+    if (value === null) {
+        return null;
+    }
+    return Number(value.toString());
+};
+const decimalsEqual = (left, right) => {
+    if (left === null || left === undefined) {
+        return right === null || right === undefined;
+    }
+    if (right === null || right === undefined) {
+        return false;
+    }
+    return left.equals(right);
+};
+const computeScdeToBill = ({ price, adjusted, consumption, proinfa }) => {
+    const unitPrice = adjusted !== null && adjusted !== void 0 ? adjusted : price;
+    if (!unitPrice || !consumption) {
+        return proinfa !== null && proinfa !== void 0 ? proinfa : null;
+    }
+    try {
+        let total = unitPrice.mul(consumption);
+        if (proinfa) {
+            total = total.plus(proinfa);
+        }
+        return total;
+    }
+    catch (error) {
+        console.warn("Failed to compute SCDE to_bill", error);
+        return null;
+    }
+};
+const serializeEnergyBalance = (record) => ({
+    id: record.id,
+    clienteNome: record.clienteNome,
+    numeroInstalacao: record.numeroInstalacao,
+    referencia: record.referencia,
+    dataBase: record.dataBase.toISOString(),
+    consumoKwh: Number(record.consumoKwh.toString()),
+    valorTotal: Number(record.valorTotal.toString()),
+    proinfaContribution: decimalToNumber(record.proinfaContribution),
+    origin: record.origin,
+    status: record.status,
+    importBatchId: record.importBatchId,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
 });
 const toDecimal = (value, field) => {
     if (value === undefined) {
@@ -143,6 +193,127 @@ const normalizeJsonForWrite = (value) => {
     }
     return value;
 };
+const extractDecimalFromUpdate = (value) => {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === null) {
+        return null;
+    }
+    if (value instanceof client_1.Prisma.Decimal) {
+        return value;
+    }
+    if (typeof value === "object") {
+        const candidate = value;
+        if (candidate && Object.prototype.hasOwnProperty.call(candidate, "set")) {
+            return extractDecimalFromUpdate(candidate.set);
+        }
+    }
+    if (typeof value === "string" || typeof value === "number") {
+        try {
+            return new client_1.Prisma.Decimal(value);
+        }
+        catch (error) {
+            console.warn("Unable to convert value to Prisma.Decimal", error);
+            return undefined;
+        }
+    }
+    return undefined;
+};
+const prisma = basePrisma.$extends({
+    query: {
+        energyBalance: {
+            async update({ args, query }) {
+                var _a;
+                const result = await query(args);
+                const updateData = args.data;
+                const proinfaCandidate = (_a = updateData === null || updateData === void 0 ? void 0 : updateData.proinfaContribution) !== null && _a !== void 0 ? _a : updateData === null || updateData === void 0 ? void 0 : updateData.proinfa_contribution;
+                const extracted = extractDecimalFromUpdate(proinfaCandidate);
+                if (extracted !== undefined) {
+                    await recalculateScdeForEnergyBalance(result);
+                }
+                return result;
+            },
+            async upsert({ args, query }) {
+                var _a, _b;
+                const result = await query(args);
+                const updateData = args.update;
+                const createData = args.create;
+                const updateExtracted = extractDecimalFromUpdate((_a = updateData === null || updateData === void 0 ? void 0 : updateData.proinfaContribution) !== null && _a !== void 0 ? _a : updateData === null || updateData === void 0 ? void 0 : updateData.proinfa_contribution);
+                const createExtracted = extractDecimalFromUpdate((_b = createData === null || createData === void 0 ? void 0 : createData.proinfaContribution) !== null && _b !== void 0 ? _b : createData === null || createData === void 0 ? void 0 : createData.proinfa_contribution);
+                if (updateExtracted !== undefined || createExtracted !== undefined) {
+                    await recalculateScdeForEnergyBalance(result);
+                }
+                return result;
+            },
+            async create({ args, query }) {
+                var _a;
+                const result = await query(args);
+                const createData = args.data;
+                const createExtracted = extractDecimalFromUpdate((_a = createData === null || createData === void 0 ? void 0 : createData.proinfaContribution) !== null && _a !== void 0 ? _a : createData === null || createData === void 0 ? void 0 : createData.proinfa_contribution);
+                if (createExtracted !== undefined) {
+                    await recalculateScdeForEnergyBalance(result);
+                }
+                return result;
+            }
+        }
+    }
+});
+async function recalculateScdeForEnergyBalance(balance) {
+    var _a, _b, _c;
+    const proinfa = (_a = balance.proinfaContribution) !== null && _a !== void 0 ? _a : null;
+    const searchConditions = [];
+    const installation = (_b = balance.numeroInstalacao) === null || _b === void 0 ? void 0 : _b.trim();
+    if (installation) {
+        searchConditions.push({ meter: installation });
+    }
+    const clientName = (_c = balance.clienteNome) === null || _c === void 0 ? void 0 : _c.trim();
+    if (clientName) {
+        searchConditions.push({ client: clientName });
+    }
+    if (!searchConditions.length) {
+        return;
+    }
+    const baseWhere = { OR: searchConditions };
+    let relatedRecords = [];
+    if (balance.dataBase instanceof Date) {
+        relatedRecords = await prisma.scde.findMany({
+            where: {
+                AND: [baseWhere, { base_date: balance.dataBase }]
+            }
+        });
+    }
+    if (!relatedRecords.length) {
+        relatedRecords = await prisma.scde.findMany({ where: baseWhere });
+    }
+    for (const record of relatedRecords) {
+        const computedToBill = computeScdeToBill({
+            price: record.price,
+            adjusted: record.adjusted,
+            consumption: record.consumption,
+            proinfa
+        });
+        const updateData = {};
+        let hasChanges = false;
+        if (!decimalsEqual(record.proinfa, proinfa)) {
+            updateData.proinfa = proinfa;
+            hasChanges = true;
+        }
+        if (computedToBill !== null) {
+            const currentToBill = record.to_bill;
+            if (currentToBill === null || !currentToBill.equals(computedToBill)) {
+                updateData.to_bill = computedToBill;
+                hasChanges = true;
+            }
+        }
+        if (hasChanges) {
+            await prisma.scde.update({
+                where: { id: record.id },
+                data: updateData
+            });
+        }
+    }
+}
 const HEADER_MAP = {
     client: "client",
     cliente: "client",
@@ -526,10 +697,23 @@ const parseRecord = (item) => {
         createData.to_bill = toBill;
         updateData.to_bill = toBill;
     }
+    else {
+        const computedToBill = computeScdeToBill({
+            price: price === undefined ? undefined : price,
+            adjusted: adjusted === undefined ? undefined : adjusted,
+            consumption: consumption === undefined ? undefined : consumption,
+            proinfa: proinfa === undefined ? undefined : proinfa
+        });
+        if (computedToBill !== null) {
+            createData.to_bill = computedToBill;
+            updateData.to_bill = computedToBill;
+        }
+    }
     const cp = toOptionalString(item.cp, "cp");
     if (cp !== undefined) {
-        createData.cp = cp;
-        updateData.cp = cp;
+        const normalizedCp = cp === null ? "None." : cp;
+        createData.cp = normalizedCp;
+        updateData.cp = normalizedCp;
     }
     const charges = toJson(item.charges, "charges");
     if (charges !== undefined) {
@@ -541,6 +725,46 @@ const parseRecord = (item) => {
 };
 app.get("/health", (_req, res) => {
     res.json({ ok: true });
+});
+app.patch("/energy-balance/:id/proinfa", async (req, res) => {
+    var _a;
+    const { id } = req.params;
+    if (typeof id !== "string" || id.trim().length === 0) {
+        return res.status(400).json({ error: "Invalid id" });
+    }
+    const payload = ((_a = req.body) !== null && _a !== void 0 ? _a : {});
+    const rawValue = Object.prototype.hasOwnProperty.call(payload, "proinfaContribution")
+        ? payload.proinfaContribution
+        : payload.proinfa_contribution;
+    let proinfa;
+    try {
+        proinfa = toDecimal(rawValue, "proinfaContribution");
+    }
+    catch (error) {
+        return res.status(400).json({
+            error: error instanceof Error ? error.message : "Invalid proinfaContribution"
+        });
+    }
+    if (proinfa === undefined) {
+        return res.status(400).json({ error: "Field proinfaContribution is required" });
+    }
+    try {
+        const updated = await prisma.energyBalance.update({
+            where: { id },
+            data: {
+                proinfaContribution: proinfa,
+                updatedAt: new Date()
+            }
+        });
+        res.json(serializeEnergyBalance(updated));
+    }
+    catch (error) {
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError &&
+            error.code === "P2025") {
+            return res.status(404).json({ error: "Record not found" });
+        }
+        res.status(500).json({ error: "Failed to update energy balance" });
+    }
 });
 app.get("/scde", async (_req, res) => {
     try {
@@ -611,10 +835,10 @@ app.post("/scde", async (req, res) => {
         const { __rowNumber, ...record } = item;
         try {
             const { client, createData, updateData } = parseRecord(record);
-            const existing = await prisma.scde.findUnique({ where: { client } });
+            const existing = await prisma.scde.findFirst({ where: { client } });
             if (existing) {
                 const result = await prisma.scde.update({
-                    where: { client },
+                    where: { id: existing.id },
                     data: updateData
                 });
                 updated.push(serialize(result));

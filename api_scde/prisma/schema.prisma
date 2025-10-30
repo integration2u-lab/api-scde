@@ -36,6 +36,7 @@ model EnergyBalance {
   dataBase         DateTime
   consumoKwh       Decimal     @db.Decimal(14, 6)
   valorTotal       Decimal     @db.Decimal(18, 2)
+  proinfaContribution Decimal? @map("proinfa_contribution") @db.Decimal(12, 3)
   origin           String
   status           String      @default("novo")
   importBatchId    String
