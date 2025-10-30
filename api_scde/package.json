@@ -1,14 +1,13 @@
 {
   "name": "api_scde",
   "version": "1.0.0",
-  "description": "",
+  "description": "SCDE API",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec \"ts-node src/server.ts\"",
     "build": "tsc",
     "start": "node dist/server.js",
-    "prisma:pull": "prisma db pull && prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:pull": "prisma db pull && prisma generate"
   },
   "keywords": [],
   "author": "",
@@ -18,10 +17,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
-    "express-rate-limit": "^7.4.0",
-    "pino": "^9.4.0",
-    "xlsx": "^0.18.5",
-    "zod": "^3.23.8"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

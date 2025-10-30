@@ -8,7 +8,8 @@ import {
   generateImportBatchId,
   parseWorkbook,
   SpreadsheetValidationError,
-  upsertRows
+  upsertEnergyRows,
+  upsertScdeRows
 } from "../services/import.service";
 
 const overwriteStrategyValues = ["upsert", "insertOnly"] as const;
@@ -62,27 +63,41 @@ const computeIdempotencyKey = (body: { base64: string; idempotencyKey?: string }
   return crypto.createHash("sha256").update(body.base64).digest("hex");
 };
 
-const decimalToNumber = (decimal: Prisma.Decimal | null) =>
+const decimalToNumber = (decimal: Prisma.Decimal | null | undefined) =>
   decimal ? Number(decimal.toString()) : 0;
-
-type PrismaDecimal = Prisma.Decimal;
 
 const formatBatchResponse = (batch: {
   batchKey: string;
-  insertedCount: number;
-  updatedCount: number;
-  skippedCount: number;
+  energyInsertedCount: number;
+  energyUpdatedCount: number;
+  energySkippedCount: number;
+  scdeInsertedCount: number;
+  scdeUpdatedCount: number;
+  scdeSkippedCount: number;
   errors: unknown;
 }) => ({
   success: true,
   importBatchId: batch.batchKey,
   counts: {
-    inserted: batch.insertedCount,
-    updated: batch.updatedCount,
-    skipped: batch.skippedCount
+    energyBalance: {
+      inserted: batch.energyInsertedCount,
+      updated: batch.energyUpdatedCount,
+      skipped: batch.energySkippedCount
+    },
+    scde: {
+      inserted: batch.scdeInsertedCount,
+      updated: batch.scdeUpdatedCount,
+      skipped: batch.scdeSkippedCount
+    }
   },
-  errors: (batch.errors as { row: number; message: string }[]) ?? []
+  errors: (batch.errors as { sheet: string; row: number; message: string }[]) ?? []
 });
+
+const getMonthRange = (year: number, month: number) => {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  return { start, end };
+};
 
 export class ImportController {
   public async handleImport(req: Request, res: Response, next: NextFunction) {
@@ -155,20 +170,32 @@ export class ImportController {
         fileName: body.fileName
       });
 
-      const upsertResult = await upsertRows(parsing.rows, {
+      const energyResult = await upsertEnergyRows(parsing.energyRows, {
         overwriteStrategy: body.overwriteStrategy,
         importBatchId: batch.batchKey
       });
 
-      const combinedErrors = [...parsing.errors, ...upsertResult.errors];
-      const jsonErrors = combinedErrors.map((error) => ({ row: error.row, message: error.message }));
+      const scdeResult = await upsertScdeRows(parsing.scdeRows, {
+        overwriteStrategy: body.overwriteStrategy,
+        importBatchId: batch.batchKey
+      });
+
+      const combinedErrors = [...parsing.errors, ...energyResult.errors, ...scdeResult.errors];
+      const jsonErrors = combinedErrors.map((error) => ({
+        sheet: error.sheet,
+        row: error.row,
+        message: error.message
+      }));
 
       const updatedBatch = await prisma.importBatch.update({
         where: { id: batch.id },
         data: {
-          insertedCount: upsertResult.counts.inserted,
-          updatedCount: upsertResult.counts.updated,
-          skippedCount: upsertResult.counts.skipped,
+          energyInsertedCount: energyResult.counts.inserted,
+          energyUpdatedCount: energyResult.counts.updated,
+          energySkippedCount: energyResult.counts.skipped,
+          scdeInsertedCount: scdeResult.counts.inserted,
+          scdeUpdatedCount: scdeResult.counts.updated,
+          scdeSkippedCount: scdeResult.counts.skipped,
           errorCount: combinedErrors.length,
           errors: jsonErrors as unknown as Prisma.JsonArray,
           completedAt: new Date()
@@ -177,7 +204,8 @@ export class ImportController {
 
       importLogger.info({
         importBatchId: batch.batchKey,
-        counts: upsertResult.counts,
+        energyCounts: energyResult.counts,
+        scdeCounts: scdeResult.counts,
         errors: combinedErrors.length
       });
 
@@ -239,19 +267,30 @@ export class ImportController {
       const skip = (page - 1) * pageSize;
 
       const referencia = `${year}-${String(month).padStart(2, "0")}`;
+      const { start, end } = getMonthRange(year, month);
 
       const [aggregated, items] = await prisma.$transaction([
         prisma.energyBalance.aggregate({
-          where: { referencia },
+          where: {
+            referenceDate: {
+              gte: start,
+              lt: end
+            }
+          },
           _count: { _all: true },
           _sum: {
-            consumoKwh: true,
-            valorTotal: true
+            consumption: true,
+            toBill: true
           }
         }),
         prisma.energyBalance.findMany({
-          where: { referencia },
-          orderBy: { dataBase: "asc" },
+          where: {
+            referenceDate: {
+              gte: start,
+              lt: end
+            }
+          },
+          orderBy: { referenceDate: "asc" },
           skip,
           take: pageSize
         })
@@ -265,8 +304,8 @@ export class ImportController {
         referencia,
         totals: {
           rows: totalRows,
-          consumoKwh: decimalToNumber(aggregated._sum.consumoKwh),
-          valorTotal: decimalToNumber(aggregated._sum.valorTotal)
+          consumption: decimalToNumber(aggregated._sum.consumption),
+          toBill: decimalToNumber(aggregated._sum.toBill)
         },
         pagination: {
           page,
@@ -275,14 +314,21 @@ export class ImportController {
         },
         items: items.map((item) => ({
           id: item.id,
-          clienteNome: item.clienteNome,
-          numeroInstalacao: item.numeroInstalacao,
-          referencia: item.referencia,
-          dataBase: item.dataBase.toISOString(),
-          consumoKwh: decimalToNumber(item.consumoKwh as PrismaDecimal),
-          valorTotal: decimalToNumber(item.valorTotal as PrismaDecimal),
+          clients: item.clients,
+          referenceDate: item.referenceDate?.toISOString() ?? null,
+          price: decimalToNumber(item.price),
+          adjusted: decimalToNumber(item.adjusted),
+          supplier: item.supplier,
+          meter: item.meter,
+          consumption: decimalToNumber(item.consumption),
+          measurement: item.measurement,
+          proinfa: decimalToNumber(item.proinfa),
+          contract: decimalToNumber(item.contract),
+          minimum: decimalToNumber(item.minimum),
+          maximum: decimalToNumber(item.maximum),
+          toBill: decimalToNumber(item.toBill),
+          cp: item.cp,
           origin: item.origin,
-          status: item.status,
           importBatchId: item.importBatchId,
           createdAt: item.createdAt.toISOString(),
           updatedAt: item.updatedAt.toISOString()
@@ -295,4 +341,3 @@ export class ImportController {
 }
 
 export const importController = new ImportController();
-

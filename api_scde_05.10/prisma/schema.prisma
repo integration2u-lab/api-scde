@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Upload {
+  id        String   @id @default(uuid())
+  data      String
+  createdAt DateTime @default(now())
+}
+
+model Scde {
+  recordId          BigInt   @id @map("recordId")
+  createdAt         DateTime @map("created_at") @db.Timestamptz(6)
+  clientName        String?  @map("clientName")
+  periodRef         String   @map("periodRef")
+  consumed          Decimal? @map("consumed") @db.Decimal
+  statusMeasurement String?  @map("statusMeasurement")
+  origin            String?  @map("origin")
+  groupName         String   @map("group")
+  client_id         String?  @db.Uuid
+
+  @@unique([groupName, periodRef])
+  @@map("SCDE")
+}
+
+model EnergyBalance {
+  id                  BigInt    @id @default(autoincrement())
+  clientName          String    @map("client_name")
+  price               Decimal?  @map("price") @db.Decimal
+  reajuted_price       Decimal?  @db.Decimal
+  referenceBase       DateTime? @map("reference_base") @db.Date
+  supplier            String?   @map("supplier")
+  email               String?
+  meter               String    @map("meter")
+  consumptionKwh      Decimal?  @map("consumption_kwh") @db.Decimal
+  loss                String?   @map("loss (3%)")
+  requirement         String?
+  net                 String?
+  proinfaContribution Decimal?  @map("proinfa_contribution") @db.Decimal
+  contract            Decimal?  @map("contract") @db.Decimal
+  minDemand           Decimal?  @map("min_demand") @db.Decimal
+  maxDemand           Decimal?  @map("max_demand") @db.Decimal
+  cpCode              String?   @map("cp_code")
+  createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  clientId            String    @map("client_id") @db.Uuid
+  contractId          BigInt?   @map("contract_id")
+  contactActive       Boolean?  @map("contact_active")
+  billable            Decimal?  @map("billable") @db.Decimal
+  adjusted            Boolean?  @map("adjusted")
+  sentOk              Boolean?  @map("sent_ok")
+  sendDate            DateTime? @map("send_date") @db.Timestamptz(6)
+  billsDate           DateTime? @map("bills_date") @db.Timestamptz(6)
+
+  @@unique([meter, clientId])
+  @@map("energy_balance")
+}
+
+model Contract {
+  id                     BigInt        @id @default(autoincrement())
+  contract_code          String?       @unique
+  client_id              String        @default(uuid()) @db.Uuid
+  client_name            String
+  social_reason          String?
+  cnpj                   String?
+  segment                String?
+  contact_responsible    String?
+  email                  String?
+  contracted_volume_mwh  Decimal?
+  status                 String        @default("Ativo")
+  energy_source          String?       @default("Convencional")
+  contracted_modality    String?
+  start_date             DateTime
+  end_date               DateTime
+  billing_cycle          String?
+  upper_limit_percent    Decimal?
+  lower_limit_percent    Decimal?
+  flexibility_percent    Decimal?
+  minDemand              Decimal?      @map("min_demand") @db.Decimal
+  maxDemand              Decimal?      @map("max_demand") @db.Decimal
+  average_price_mwh      Decimal?
+  spot_price_ref_mwh     Decimal?
+  price                  Decimal?      @db.Decimal
+  reajuted_price         Decimal?      @db.Decimal
+  compliance_consumption String?       @default("Em anï¿½lise")
+  compliance_nf          String?       @default("Em anï¿½lise")
+  compliance_invoice     String?       @default("Em anï¿½lise")
+  compliance_charges     String?       @default("Em anï¿½lise")
+  compliance_overall     String?       @default("Em anï¿½lise")
+  created_at             DateTime      @default(now())
+  updated_at             DateTime      @updatedAt
+  groupName              String        @map("group")
+  supplier               String?       @map("supplier")
+  proinfa_contribution   Decimal?      @map("proinfa_contribution") @db.Decimal
+  opportunities          Opportunity[]
+}
+
+model Client {
+  clientId  String   @id @default(uuid()) @map("client_id") @db.Uuid
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("clients")
+}
+
+model Opportunity {
+  id            String    @id @default(uuid())
+  contractId    BigInt    @map("contract_id")
+  clientId      String?   @map("client_id") @db.Uuid
+  clientName    String    @map("client_name")
+  category      String
+  title         String
+  period        DateTime  @db.Date
+  savingMonthly Decimal   @map("saving_monthly") @db.Decimal
+  impactPct     Decimal   @map("impact_pct") @db.Decimal
+  priority      Int       @default(1)
+  dueDate       DateTime? @map("due_date") @db.Date
+  status        String
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@map("opportunities")
+}
+
