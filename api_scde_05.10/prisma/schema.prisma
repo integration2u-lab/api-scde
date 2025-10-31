@@ -41,6 +41,7 @@ model EnergyBalance {
   loss                String?   @map("loss (3%)")
   requirement         String?
   net                 String?
+  statusMeasurement   String?   @map("statusMeasurement")
   proinfaContribution Decimal?  @map("proinfa_contribution") @db.Decimal
   contract            Decimal?  @map("contract") @db.Decimal
   minDemand           Decimal?  @map("min_demand") @db.Decimal

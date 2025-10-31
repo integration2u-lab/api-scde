@@ -50,6 +50,8 @@ export const createContractSchema = z.object({
   lower_limit_percent: decimalField.optional(),
   flexibility_percent: decimalField.optional(),
   average_price_mwh: decimalField.optional(),
+  price: decimalField.optional(),
+  reajuted_price: decimalField.optional(),
   proinfa_contribution: decimalField.optional(),
   spot_price_ref_mwh: decimalField.optional(),
   compliance_consumption: optionalString,

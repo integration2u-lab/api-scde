@@ -35,11 +35,25 @@ const normalizeContractInput = (payload: unknown) => {
   } else if (data.proinfa_contribution !== undefined && data.proinfaContribution === undefined) {
     data.proinfaContribution = data.proinfa_contribution;
   }
+  if (data.reajuted_price === undefined && data.reajutedPrice !== undefined) {
+    data.reajuted_price = data.reajutedPrice;
+  } else if (data.reajuted_price !== undefined && data.reajutedPrice === undefined) {
+    data.reajutedPrice = data.reajuted_price;
+  }
   if (typeof data.proinfa_contribution === "string") {
     data.proinfa_contribution = data.proinfa_contribution.replace(",", ".");
   }
   if (typeof data.proinfaContribution === "string") {
     data.proinfaContribution = data.proinfaContribution.replace(",", ".");
+  }
+  if (typeof data.price === "string") {
+    data.price = data.price.replace(",", ".");
+  }
+  if (typeof data.reajuted_price === "string") {
+    data.reajuted_price = data.reajuted_price.replace(",", ".");
+  }
+  if (typeof data.reajutedPrice === "string") {
+    data.reajutedPrice = data.reajutedPrice.replace(",", ".");
   }
   return data;
 };

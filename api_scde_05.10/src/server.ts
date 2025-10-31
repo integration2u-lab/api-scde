@@ -628,6 +628,14 @@ async function fetchTopContractsByVolume(limit) {
             status: true,
             start_date: true,
             end_date: true,
+            price: true,
+            reajuted_price: true,
+            average_price_mwh: true,
+            proinfa_contribution: true,
+            minDemand: true,
+            maxDemand: true,
+            supplier: true,
+            email: true,
         },
     });
     return rows.map((row) => ({
@@ -638,6 +646,14 @@ async function fetchTopContractsByVolume(limit) {
         status: row.status,
         startDate: row.start_date instanceof Date ? row.start_date.toISOString() : null,
         endDate: row.end_date instanceof Date ? row.end_date.toISOString() : null,
+        price: decimalToNumber(row.price) ?? null,
+        reajutedPrice: decimalToNumber(row.reajuted_price) ?? null,
+        averagePriceMwh: decimalToNumber(row.average_price_mwh) ?? null,
+        proinfaContribution: decimalToNumber(row.proinfa_contribution) ?? null,
+        minDemand: decimalToNumber(row.minDemand) ?? null,
+        maxDemand: decimalToNumber(row.maxDemand) ?? null,
+        supplier: row.supplier ?? null,
+        email: row.email ?? null,
     }));
 }
 exports.app.get("/api/contratos/oportunidades", async (req, res) => {
@@ -927,6 +943,12 @@ const processScdeRecords = async (records) => {
             supplier: getFirstValue(record, ["supplier", "Supplier"]) ?? null,
             email: getFirstValue(record, ["email", "Email"]) ?? null,
             ativaCKwh: consumptionValue,
+            statusMeasurement: getFirstValue(record, [
+                "statusMeasurement",
+                "status_measurement",
+                "Status Measurement",
+                "Qualidade",
+            ]) ?? scdePayload.statusMeasurement ?? null,
             proinfaContribution: getFirstValue(record, ["proinfa_contribution", "proinfaContribution", "Proinfa Contribution"]),
             contract: getFirstValue(record, ["contract", "Contract"]),
             adjusted: getFirstValue(record, ["adjusted", "Adjusted"]),

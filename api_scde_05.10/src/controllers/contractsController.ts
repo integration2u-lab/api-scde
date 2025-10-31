@@ -31,6 +31,8 @@ const contractFields: Array<keyof CreateContractInput> = [
   "minDemand",
   "maxDemand",
   "average_price_mwh",
+  "price",
+  "reajuted_price",
   "proinfa_contribution",
   "spot_price_ref_mwh",
   "compliance_consumption",

@@ -34,8 +34,6 @@ type PrismaMock = {
 
 const getPrismaMock = (): PrismaMock => prisma as unknown as PrismaMock;
 
-const expectedCpCode = "\u004E\u00E3o h\u00E1.";
-
 describe("updateEnergyBalance", () => {
   beforeEach(() => {
     const prismaMock = getPrismaMock();
@@ -76,6 +74,7 @@ describe("updateEnergyBalance", () => {
       reajutedPrice: "0.5",
       supplier: "Fornecedor",
       ativaCKwh: "100",
+      statusMeasurement: "OK",
       proinfaContribution: "0.01",
       contract: "50",
       adjusted: true,
@@ -95,7 +94,7 @@ describe("updateEnergyBalance", () => {
     expect(createArgs.data.meter).toBe("MTR-1");
     expect(createArgs.data.clientName).toBe("Cliente");
     expect(createArgs.data.referenceBase).toEqual(new Date("2024-01-01"));
-    expect(createArgs.data.consumptionKwh?.toString()).toBe("0.1");
+    expect(createArgs.data.consumptionKwh?.toString()).toBe("100");
     expect(createArgs.data.proinfaContribution.toString()).toBe("0.01");
     expect(createArgs.data.contract.toString()).toBe("50");
     expect(createArgs.data.reajuted_price?.toString()).toBe("0.5");
@@ -105,24 +104,25 @@ describe("updateEnergyBalance", () => {
     expect(createArgs.data.billsDate).toEqual(new Date("2024-01-20T00:00:00Z"));
     expect(createArgs.data.minDemand?.toString()).toBe("0");
     expect(createArgs.data.maxDemand?.toString()).toBe("100");
-    expect(createArgs.data.billable?.toString()).toBe(
-      new Prisma.Decimal("0.1")
-        .mul(new Prisma.Decimal(103))
-        .div(new Prisma.Decimal(100))
-        .minus(new Prisma.Decimal("0.01"))
-        .toString(),
-    );
+    expect(createArgs.data.billable?.toString()).toBe("100");
     expect(createArgs.data.loss).toBe(
-      new Prisma.Decimal("0.1").mul(new Prisma.Decimal("0.03")).toString(),
+      new Prisma.Decimal("100").mul(new Prisma.Decimal("0.03")).toString(),
     );
     expect(createArgs.data.requirement).toBe(
-      new Prisma.Decimal("0.1")
-        .add(new Prisma.Decimal("0.1").mul(new Prisma.Decimal("0.03")))
+      new Prisma.Decimal("100")
+        .add(new Prisma.Decimal("100").mul(new Prisma.Decimal("0.03")))
         .minus(new Prisma.Decimal("0.01"))
         .toString(),
     );
-    expect(createArgs.data.net).toBe("0");
-    expect(createArgs.data.cpCode).toBe(expectedCpCode);
+    expect(createArgs.data.net).toBe(
+      new Prisma.Decimal("100")
+        .add(new Prisma.Decimal("100").mul(new Prisma.Decimal("0.03")))
+        .minus(new Prisma.Decimal("0.01"))
+        .minus(new Prisma.Decimal("100"))
+        .toString(),
+    );
+    expect(createArgs.data.cpCode).toBe("Compra");
+    expect(createArgs.data.statusMeasurement).toBe("OK");
     expect(createArgs.data.contractId).toBe(BigInt(12));
     expect(createArgs.data.adjusted).toBe(true);
     expect(createArgs.data.createdAt).toEqual(new Date("2024-01-05T00:00:00Z"));
@@ -172,19 +172,20 @@ describe("updateEnergyBalance", () => {
     expect(updateArgs.data.sendDate).toEqual(new Date("2024-02-10T00:00:00Z"));
     expect(updateArgs.data.billsDate).toBeNull();
     expect(updateArgs.data.reajuted_price).toBeNull();
-    expect(updateArgs.data.loss).toBe(new Prisma.Decimal("200").mul(new Prisma.Decimal("0.03")).toString());
+    expect(updateArgs.data.loss).toBe(new Prisma.Decimal("200000").mul(new Prisma.Decimal("0.03")).toString());
     expect(updateArgs.data.requirement).toBe(
-      new Prisma.Decimal("200")
-        .add(new Prisma.Decimal("200").mul(new Prisma.Decimal("0.03")))
+      new Prisma.Decimal("200000")
+        .add(new Prisma.Decimal("200000").mul(new Prisma.Decimal("0.03")))
         .toString(),
     );
     expect(updateArgs.data.net).toBe(
-      new Prisma.Decimal("200")
-        .add(new Prisma.Decimal("200").mul(new Prisma.Decimal("0.03")))
+      new Prisma.Decimal("200000")
+        .add(new Prisma.Decimal("200000").mul(new Prisma.Decimal("0.03")))
         .minus(new Prisma.Decimal("100"))
         .toString(),
     );
     expect(updateArgs.data.cpCode).toBe("Compra");
+    expect(updateArgs.data.statusMeasurement).toBeNull();
     expect(updateArgs.data.updatedAt).toBeInstanceOf(Date);
   });
 
@@ -218,12 +219,13 @@ describe("updateEnergyBalance", () => {
     expect(createArgs.data.billable).toBeNull();
     expect(createArgs.data.reajuted_price).toBeNull();
     expect(createArgs.data.cpCode).toBeNull();
+    expect(createArgs.data.statusMeasurement).toBeNull();
     expect(createArgs.data.loss).toBe(
-      new Prisma.Decimal("0.5").mul(new Prisma.Decimal("0.03")).toString(),
+      new Prisma.Decimal("500").mul(new Prisma.Decimal("0.03")).toString(),
     );
     expect(createArgs.data.requirement).toBe(
-      new Prisma.Decimal("0.5")
-        .add(new Prisma.Decimal("0.5").mul(new Prisma.Decimal("0.03")))
+      new Prisma.Decimal("500")
+        .add(new Prisma.Decimal("500").mul(new Prisma.Decimal("0.03")))
         .toString(),
     );
     expect(createArgs.data.net).toBeNull();
@@ -266,6 +268,7 @@ describe("updateEnergyBalance", () => {
     expect(prismaMock.energyBalance.create).toHaveBeenCalledTimes(1);
     const createArgs = prismaMock.energyBalance.create.mock.calls[0][0];
     expect(createArgs.data.email).toBe("cliente@empresa.com");
+    expect(createArgs.data.statusMeasurement).toBeNull();
     expect(prismaMock.client.findUnique).toHaveBeenCalledTimes(1);
   });
 });

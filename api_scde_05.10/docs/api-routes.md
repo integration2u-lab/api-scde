@@ -26,7 +26,7 @@ Cria um contrato.
 | `end_date` | string (ISO) | âœ” | Data de tÃ©rmino. |
 | `email` | string | âœ– | E-mail de contato. |
 | `contracted_volume_mwh` | string/number | âœ– | Volume contratado. |
-| `status`, `energy_source`, `contracted_modality`, `billing_cycle`, `cnpj`, `segment`, `supplier`, `contact_responsible`, `proinfa_contribution`, `average_price_mwh`, `spot_price_ref_mwh`, `upper_limit_percent`, `lower_limit_percent`, `flexibility_percent`, `compliance_*`, `created_at`, `updated_at` | diversos | âœ– | Campos adicionais aceitos pelo schema Zod. Strings numÃ©ricas podem usar vÃ­rgula ou ponto. |
+| `status`, `energy_source`, `contracted_modality`, `billing_cycle`, `cnpj`, `segment`, `supplier`, `contact_responsible`, `proinfa_contribution`, `average_price_mwh`, `price`, `reajuted_price`, `spot_price_ref_mwh`, `upper_limit_percent`, `lower_limit_percent`, `flexibility_percent`, `compliance_*`, `created_at`, `updated_at` | diversos | âœ– | Campos adicionais aceitos pelo schema Zod. Strings numÃ©ricas podem usar vÃ­rgula ou ponto. |
 
 **Resposta 201**
 Contrato criado (inclui `id`, `created_at`, `updated_at`, `minDemand`, `maxDemand` calculados).
@@ -75,7 +75,7 @@ Cria/atualiza um registro com base no `meter`. Caso o `meter` jÃ¡ exista, os v
 | `referenceBase` | string (ISO) | âœ” |
 | `ativaCKwh` | string/number | âœ” | Consumo ativo (kWh). |
 | `clientId` | string (UUID) | âœ” | No `POST` padrÃ£o o router gera automaticamente um UUID se inexistente. |
-| `price`, `supplier`, `email`, `proinfaContribution`, `contract`, `adjusted`, `contactActive`, `contractId`, `sentOk`, `sendDate`, `billsDate`, `createdAt`, `updatedAt` | diversos | âœ– | Campos opcionais. `sentOk` aceita booleano ou valores equivalentes (`"1"`, `"true"`, etc.). |
+| `price`, `supplier`, `email`, `statusMeasurement`, `proinfaContribution`, `contract`, `adjusted`, `contactActive`, `contractId`, `sentOk`, `sendDate`, `billsDate`, `createdAt`, `updatedAt` | diversos | âœ– | Campos opcionais. `statusMeasurement` replica o valor recebido do SCDE quando presente. `sentOk` aceita booleano ou valores equivalentes (`"1"`, `"true"`, etc.). |
 | `loss`, `requirement`, `net`, `billable`, `minDemand`, `maxDemand`, `cpCode` | string/null | nao | Campos derivados recalculados pelo backend e devolvidos em todas as respostas do CRUD. Valores enviados no corpo sao ignorados.
 
 ### `PUT /energy-balance/:id`

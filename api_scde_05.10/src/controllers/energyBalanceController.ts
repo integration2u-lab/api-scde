@@ -15,6 +15,7 @@ export type EnergyBalancePayload = {
   supplier?: string | null;
   email?: string | null;
   ativaCKwh: Decimalish;
+  statusMeasurement?: string | null;
   proinfaContribution?: Decimalish;
   contract?: Decimalish;
   adjusted?: boolean | null;
@@ -32,11 +33,18 @@ type UpsertResult =
   | { success: true; message: string; data: EnergyBalance }
   | { success: false; message: string; error: unknown };
 
+type EnergyBalanceCommonInput = Prisma.EnergyBalanceUncheckedCreateInput & {
+  statusMeasurement?: string | null;
+};
+
+type EnergyBalanceUpdateInput = Prisma.EnergyBalanceUncheckedUpdateInput & {
+  statusMeasurement?: string | null;
+};
+
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DECIMAL_ONE_HUNDRED = new Prisma.Decimal(100);
 const DECIMAL_ONE_HUNDRED_THREE = new Prisma.Decimal(103);
 const DECIMAL_TWO = new Prisma.Decimal(2);
-const DECIMAL_ONE_THOUSAND = new Prisma.Decimal(1000);
 const DECIMAL_LOSS_RATE = new Prisma.Decimal("0.03");
 
 const toDecimal = (value: Decimalish, field?: string): Prisma.Decimal | null | undefined => {
@@ -54,10 +62,29 @@ const toDecimal = (value: Decimalish, field?: string): Prisma.Decimal | null | u
     }
 
     if (typeof value === "string") {
-      const normalized = value.trim().replace(",", ".");
-      if (normalized.length === 0) {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
         return null;
       }
+
+      let normalized = trimmed;
+      const hasComma = normalized.includes(",");
+      const hasDot = normalized.includes(".");
+
+      if (hasComma && hasDot) {
+        const lastComma = normalized.lastIndexOf(",");
+        const lastDot = normalized.lastIndexOf(".");
+        if (lastComma > lastDot) {
+          normalized = normalized.replace(/\./g, "").replace(",", ".");
+        } else {
+          normalized = normalized.replace(/,/g, "");
+        }
+      } else if (hasComma) {
+        normalized = normalized.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
+
       return new Prisma.Decimal(normalized);
     }
 
@@ -122,6 +149,8 @@ const buildRelatedContract = async (meter: string, clientId?: string | null) => 
     select: {
       id: true,
       average_price_mwh: true,
+      price: true,
+      reajuted_price: true,
       supplier: true,
       email: true,
       client_id: true,
@@ -158,7 +187,7 @@ export async function updateEnergyBalance(payload: EnergyBalancePayload): Promis
     if (rawConsumption === undefined || rawConsumption === null) {
       throw new Error("Missing required column 'Ativa C (kWh)'.");
     }
-    const consumptionKwh = rawConsumption.div(DECIMAL_ONE_THOUSAND);
+    const consumptionKwh = rawConsumption;
 
     const clientIdInput = payload.clientId;
     if (!clientIdInput) {
@@ -170,9 +199,11 @@ export async function updateEnergyBalance(payload: EnergyBalancePayload): Promis
       relatedContract = await buildRelatedContract(meter);
     }
 
-    const priceSource = payload.price ?? relatedContract?.average_price_mwh ?? null;
+    const priceSource =
+      payload.price ?? relatedContract?.price ?? relatedContract?.average_price_mwh ?? null;
     const price = toDecimal(priceSource, "price") ?? null;
-    const reajutedPriceSource = payload.reajutedPrice ?? null;
+    const reajutedPriceSource =
+      payload.reajutedPrice ?? relatedContract?.reajuted_price ?? null;
     const reajutedPrice = toDecimal(reajutedPriceSource, "reajutedPrice") ?? null;
 
     const contractSource = payload.contract ?? relatedContract?.contracted_volume_mwh ?? null;
@@ -234,6 +265,7 @@ export async function updateEnergyBalance(payload: EnergyBalancePayload): Promis
     const adjusted = payload.adjusted ?? null;
     const contactActive = payload.contactActive ?? null;
     const supplier = payload.supplier ?? relatedContract?.supplier ?? null;
+    const statusMeasurement = normalizeNullableString(payload.statusMeasurement ?? null) ?? null;
     let email: string | null = null;
     if (relatedContract) {
       email = normalizeNullableString(relatedContract.email ?? null) ?? null;
@@ -273,6 +305,7 @@ export async function updateEnergyBalance(payload: EnergyBalancePayload): Promis
       minDemand,
       maxDemand,
       cpCode: cpCode ?? null,
+      statusMeasurement,
       clientId: clientIdInput,
       contractId,
       adjusted,
@@ -284,20 +317,20 @@ export async function updateEnergyBalance(payload: EnergyBalancePayload): Promis
       sentOk,
       sendDate,
       billsDate,
-    } satisfies Prisma.EnergyBalanceUncheckedCreateInput;
+    } satisfies EnergyBalanceCommonInput;
 
-    const updateData: Prisma.EnergyBalanceUncheckedUpdateInput = {
+    const updateData = {
       ...commonData,
       clientId: clientIdInput,
       contractId,
       updatedAt: explicitUpdatedAt ?? now,
-    };
+    } satisfies EnergyBalanceUpdateInput;
 
-    const createData: Prisma.EnergyBalanceUncheckedCreateInput = {
+    const createData = {
       ...commonData,
       createdAt: explicitCreatedAt ?? now,
       updatedAt: explicitUpdatedAt ?? now,
-    };
+    } satisfies EnergyBalanceCommonInput;
 
     const existing = await prisma.energyBalance.findFirst({
       where: { meter },
